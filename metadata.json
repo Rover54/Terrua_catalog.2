@@ -1,0 +1,7 @@
+{
+  "name": "Terrua Store Catalog",
+  "description": "A premium product listing platform featuring AI-powered visual search using your device's camera and Gemini 3 Flash.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
