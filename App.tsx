@@ -22,7 +22,6 @@ const App: React.FC = () => {
 
   const bgLight = "#F9F8F6";
 
-  // Suscripción en tiempo real a Firestore
   useEffect(() => {
     const q = query(collection(db, 'productos'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -69,17 +68,52 @@ const App: React.FC = () => {
     setStatus(AppStatus.SEARCHING);
     setErrorMessage(null);
     try {
-      const result = await performVisualSearch(base64, products);
-      setSearchResult(result);
+      // 1. La IA analiza la imagen (OCR + Reconocimiento de objeto)
+      const aiResult = await performVisualSearch(base64);
+      
+      // 2. Búsqueda local en el catálogo de Firestore (Eficiente para miles de productos)
+      let matchId: string | null = null;
+      let confidence = 0.95;
+
+      // Prioridad 1: Coincidencia por código detectado
+      if (aiResult.detectedCode) {
+        const found = products.find(p => 
+          p.productCode.toLowerCase() === aiResult.detectedCode?.toLowerCase()
+        );
+        if (found) matchId = found.id;
+      }
+
+      // Prioridad 2: Si no hay código, buscar por palabras clave en nombre/tags
+      if (!matchId) {
+        const found = products.find(p => 
+          aiResult.suggestedKeywords.some(keyword => 
+            p.name.toLowerCase().includes(keyword.toLowerCase()) ||
+            p.tags.some(t => t.toLowerCase() === keyword.toLowerCase())
+          )
+        );
+        if (found) {
+          matchId = found.id;
+          confidence = 0.75;
+        }
+      }
+
+      setSearchResult({
+        matchId,
+        confidence,
+        detectedObject: aiResult.detectedObject,
+        detectedCode: aiResult.detectedCode,
+        reasoning: aiResult.reasoning
+      });
+
       setIsCameraOpen(false);
       setStatus(AppStatus.IDLE);
       
-      if (!result.matchId) {
-        setErrorMessage(`AI detectó "${result.detectedObject}" ${result.detectedCode ? `con código ${result.detectedCode}` : ''}, pero no hubo coincidencia en el inventario.`);
+      if (!matchId) {
+        setErrorMessage(`Detectado: "${aiResult.detectedObject}". No se encontró coincidencia exacta en los ${products.length} productos del inventario.`);
       }
     } catch (err) {
       console.error(err);
-      setErrorMessage("Error al realizar la búsqueda visual. Intenta de nuevo.");
+      setErrorMessage("Error de procesamiento. Asegúrate de tener buena iluminación y conexión.");
       setStatus(AppStatus.ERROR);
       setIsCameraOpen(false);
     }
@@ -111,7 +145,7 @@ const App: React.FC = () => {
             <div className="flex-1 max-w-lg mx-8 relative">
               <input
                 type="text"
-                placeholder="Buscar por nombre o código de barras..."
+                placeholder="Buscar por nombre o código..."
                 className="w-full bg-[#F5F5F4] border-transparent focus:bg-white focus:ring-2 focus:ring-[#064e3b] rounded-2xl py-3 px-12 text-sm transition-all shadow-inner text-[#064e3b]"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -142,7 +176,7 @@ const App: React.FC = () => {
         {isLoading ? (
           <div className="py-20 text-center">
             <div className="w-12 h-12 border-4 border-[#064e3b] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-gray-500 font-medium">Sincronizando inventario con Firestore...</p>
+            <p className="text-gray-500 font-medium">Sincronizando inventario...</p>
           </div>
         ) : (
           <>
@@ -157,10 +191,10 @@ const App: React.FC = () => {
                 </div>
                 
                 <div className="flex flex-col md:flex-row items-center gap-8">
-                  <div className={`w-24 h-24 rounded-[1.5rem] flex items-center justify-center flex-shrink-0 shadow-lg ${searchResult.detectedCode ? 'bg-green-600 text-white' : 'bg-[#064e3b] text-white'}`}>
-                    {searchResult.detectedCode ? (
+                  <div className={`w-24 h-24 rounded-[1.5rem] flex items-center justify-center flex-shrink-0 shadow-lg ${searchResult.matchId ? 'bg-green-600 text-white' : 'bg-orange-500 text-white'}`}>
+                    {searchResult.matchId ? (
                        <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                        </svg>
                     ) : (
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -171,13 +205,13 @@ const App: React.FC = () => {
                   
                   <div className="flex-1 text-center md:text-left">
                     <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-2">
-                      <span className="bg-[#F5F5F4] text-[#064e3b] text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-[#E7E5E4]">Análisis Inteligente</span>
+                      <span className="bg-[#F5F5F4] text-[#064e3b] text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-[#E7E5E4]">Escaneo Finalizado</span>
                       {searchResult.detectedCode && (
-                        <span className="bg-[#F1F5F2] text-green-700 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-green-200">Código Detectado: {searchResult.detectedCode}</span>
+                        <span className="bg-[#F1F5F2] text-green-700 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-green-200">ID: {searchResult.detectedCode}</span>
                       )}
                     </div>
                     <h2 className="text-3xl font-black text-[#064e3b] mb-2">
-                      {searchResult.matchId ? 'Coincidencia Identificada' : 'Resultado de Búsqueda'}
+                      {searchResult.matchId ? '¡Producto Encontrado!' : 'Objeto Identificado'}
                     </h2>
                     <p className="text-gray-600 leading-relaxed italic max-w-2xl">
                       "{searchResult.reasoning}"
@@ -188,14 +222,16 @@ const App: React.FC = () => {
             )}
 
             {errorMessage && (
-              <div className="mb-8 bg-red-50 border border-red-100 text-red-700 px-8 py-5 rounded-2xl flex justify-between items-center animate-in fade-in duration-300">
+              <div className="mb-8 bg-red-50 border border-red-100 text-red-700 px-8 py-5 rounded-2xl flex justify-between items-center animate-in fade-in duration-300 shadow-sm">
                 <div className="flex items-center gap-3">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+                  <div className="bg-red-100 p-2 rounded-full">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
                   <span className="font-semibold">{errorMessage}</span>
                 </div>
-                <button onClick={() => setErrorMessage(null)} className="text-red-400 hover:text-red-600 transition font-bold text-sm uppercase">Cerrar</button>
+                <button onClick={() => setErrorMessage(null)} className="text-red-400 hover:text-red-600 transition font-bold text-xs uppercase tracking-widest">Cerrar</button>
               </div>
             )}
 
@@ -203,10 +239,10 @@ const App: React.FC = () => {
               <div>
                 <div className="flex items-center gap-3 mb-2">
                   <span className="h-px w-8 bg-[#064e3b]"></span>
-                  <span className="text-xs font-bold uppercase tracking-widest text-[#064e3b]">Cloud Inventory</span>
+                  <span className="text-xs font-bold uppercase tracking-widest text-[#064e3b]">Inventario Sincronizado</span>
                 </div>
                 <h2 className="text-4xl md:text-5xl font-black text-[#064e3b] tracking-tight">
-                  {products.length} Productos en Firestore
+                  {products.length} Productos
                 </h2>
               </div>
               

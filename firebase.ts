@@ -1,7 +1,7 @@
-
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
+// Configuración de Firebase para Terrua Store
 const firebaseConfig = {
   apiKey: "AIzaSyCZsPF_VYAgDe0EHZrj84EUpvmfXcPZCEY",
   authDomain: "hosting-terrua.firebaseapp.com",
