@@ -1,7 +1,8 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { collection, onSnapshot, query } from 'firebase/firestore';
+import { db } from './firebase';
 import { Product, AppStatus, VisualSearchMatch, ViewMode } from './types';
-import { MOCK_PRODUCTS } from './constants';
 import { ProductCard } from './components/ProductCard';
 import { CameraSearch } from './components/CameraSearch';
 import { DatabaseManager } from './components/DatabaseManager';
@@ -9,7 +10,8 @@ import { ChatBot } from './components/ChatBot';
 import { performVisualSearch } from './services/geminiService';
 
 const App: React.FC = () => {
-  const [products, setProducts] = useState<Product[]>(MOCK_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -18,9 +20,26 @@ const App: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('standard');
 
-  const brandGreen = "#064e3b";
-  const brandBrown = "#E7E5E4";
   const bgLight = "#F9F8F6";
+
+  // Suscripción en tiempo real a Firestore
+  useEffect(() => {
+    const q = query(collection(db, 'productos'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const productsData = snapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id
+      })) as Product[];
+      setProducts(productsData);
+      setIsLoading(false);
+    }, (error) => {
+      console.error("Error al leer Firestore:", error);
+      setErrorMessage("Error de conexión con la base de datos.");
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const filteredProducts = useMemo(() => {
     let list = [...products];
@@ -56,21 +75,14 @@ const App: React.FC = () => {
       setStatus(AppStatus.IDLE);
       
       if (!result.matchId) {
-        setErrorMessage(`AI detected "${result.detectedObject}" ${result.detectedCode ? `with code ${result.detectedCode}` : ''}, but no match found.`);
+        setErrorMessage(`AI detectó "${result.detectedObject}" ${result.detectedCode ? `con código ${result.detectedCode}` : ''}, pero no hubo coincidencia en el inventario.`);
       }
     } catch (err) {
       console.error(err);
-      setErrorMessage("Failed to perform visual search. Please check your connection.");
+      setErrorMessage("Error al realizar la búsqueda visual. Intenta de nuevo.");
       setStatus(AppStatus.ERROR);
       setIsCameraOpen(false);
     }
-  };
-
-  const handleDatabaseUpload = (newProducts: Product[]) => {
-    setProducts(newProducts);
-    setIsDbManagerOpen(false);
-    setSearchResult(null);
-    setErrorMessage(null);
   };
 
   const getGridClasses = () => {
@@ -99,7 +111,7 @@ const App: React.FC = () => {
             <div className="flex-1 max-w-lg mx-8 relative">
               <input
                 type="text"
-                placeholder="Search by name or barcode code..."
+                placeholder="Buscar por nombre o código de barras..."
                 className="w-full bg-[#F5F5F4] border-transparent focus:bg-white focus:ring-2 focus:ring-[#064e3b] rounded-2xl py-3 px-12 text-sm transition-all shadow-inner text-[#064e3b]"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -119,7 +131,7 @@ const App: React.FC = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7c0 1.5 1.5 2.5 3.5 2.5h9c2 0 3.5-1 3.5-2.5" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12c0 1.5 1.5 2.5 3.5 2.5h9c2 0 3.5-1 3.5-2.5" />
                 </svg>
-                DB Manager
+                Gestor DB
               </button>
             </div>
           </div>
@@ -127,122 +139,127 @@ const App: React.FC = () => {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
-        {searchResult && (
-          <div className="mb-10 bg-white border border-[#E7E5E4] rounded-[2.5rem] p-10 relative overflow-hidden shadow-xl ring-1 ring-[#064e3b]/5">
-            <div className="absolute top-0 right-0 p-8">
-              <button onClick={() => setSearchResult(null)} className="text-gray-300 hover:text-[#064e3b] transition">
-                 <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                 </svg>
-              </button>
-            </div>
-            
-            <div className="flex flex-col md:flex-row items-center gap-8">
-              <div className={`w-24 h-24 rounded-[1.5rem] flex items-center justify-center flex-shrink-0 shadow-lg ${searchResult.detectedCode ? 'bg-green-600 text-white' : 'bg-[#064e3b] text-white'}`}>
-                {searchResult.detectedCode ? (
-                   <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                   </svg>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        {isLoading ? (
+          <div className="py-20 text-center">
+            <div className="w-12 h-12 border-4 border-[#064e3b] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-gray-500 font-medium">Sincronizando inventario con Firestore...</p>
+          </div>
+        ) : (
+          <>
+            {searchResult && (
+              <div className="mb-10 bg-white border border-[#E7E5E4] rounded-[2.5rem] p-10 relative overflow-hidden shadow-xl ring-1 ring-[#064e3b]/5">
+                <div className="absolute top-0 right-0 p-8">
+                  <button onClick={() => setSearchResult(null)} className="text-gray-300 hover:text-[#064e3b] transition">
+                     <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                     </svg>
+                  </button>
+                </div>
+                
+                <div className="flex flex-col md:flex-row items-center gap-8">
+                  <div className={`w-24 h-24 rounded-[1.5rem] flex items-center justify-center flex-shrink-0 shadow-lg ${searchResult.detectedCode ? 'bg-green-600 text-white' : 'bg-[#064e3b] text-white'}`}>
+                    {searchResult.detectedCode ? (
+                       <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                       </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                    )}
+                  </div>
+                  
+                  <div className="flex-1 text-center md:text-left">
+                    <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-2">
+                      <span className="bg-[#F5F5F4] text-[#064e3b] text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-[#E7E5E4]">Análisis Inteligente</span>
+                      {searchResult.detectedCode && (
+                        <span className="bg-[#F1F5F2] text-green-700 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-green-200">Código Detectado: {searchResult.detectedCode}</span>
+                      )}
+                    </div>
+                    <h2 className="text-3xl font-black text-[#064e3b] mb-2">
+                      {searchResult.matchId ? 'Coincidencia Identificada' : 'Resultado de Búsqueda'}
+                    </h2>
+                    <p className="text-gray-600 leading-relaxed italic max-w-2xl">
+                      "{searchResult.reasoning}"
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {errorMessage && (
+              <div className="mb-8 bg-red-50 border border-red-100 text-red-700 px-8 py-5 rounded-2xl flex justify-between items-center animate-in fade-in duration-300">
+                <div className="flex items-center gap-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                )}
+                  <span className="font-semibold">{errorMessage}</span>
+                </div>
+                <button onClick={() => setErrorMessage(null)} className="text-red-400 hover:text-red-600 transition font-bold text-sm uppercase">Cerrar</button>
+              </div>
+            )}
+
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="h-px w-8 bg-[#064e3b]"></span>
+                  <span className="text-xs font-bold uppercase tracking-widest text-[#064e3b]">Cloud Inventory</span>
+                </div>
+                <h2 className="text-4xl md:text-5xl font-black text-[#064e3b] tracking-tight">
+                  {products.length} Productos en Firestore
+                </h2>
               </div>
               
-              <div className="flex-1 text-center md:text-left">
-                <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-2">
-                  <span className="bg-[#F5F5F4] text-[#064e3b] text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-[#E7E5E4]">Smart Analysis</span>
-                  {searchResult.detectedCode && (
-                    <span className="bg-[#F1F5F2] text-green-700 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-green-200">Barcode Detected: {searchResult.detectedCode}</span>
-                  )}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-gray-400 mr-2 uppercase tracking-widest">Vista</span>
+                <div className="flex bg-white shadow-sm border border-[#E7E5E4] p-1.5 rounded-2xl">
+                   {(['compact', 'standard', 'xxl'] as ViewMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setViewMode(mode)}
+                      className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${viewMode === mode ? 'bg-[#064e3b] text-white shadow-md' : 'text-gray-400 hover:text-[#064e3b]'}`}
+                    >
+                      {mode === 'compact' && <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>}
+                      {mode === 'standard' && <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>}
+                      {mode === 'xxl' && <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5z" /></svg>}
+                    </button>
+                  ))}
                 </div>
-                <h2 className="text-3xl font-black text-[#064e3b] mb-2">
-                  {searchResult.matchId ? 'Match Identified' : 'Search Feedback'}
-                </h2>
-                <p className="text-gray-600 leading-relaxed italic max-w-2xl">
-                  "{searchResult.reasoning}"
-                </p>
               </div>
             </div>
-          </div>
-        )}
 
-        {errorMessage && (
-          <div className="mb-8 bg-red-50 border border-red-100 text-red-700 px-8 py-5 rounded-2xl flex justify-between items-center animate-in fade-in duration-300">
-            <div className="flex items-center gap-3">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="font-semibold">{errorMessage}</span>
-            </div>
-            <button onClick={() => setErrorMessage(null)} className="text-red-400 hover:text-red-600 transition font-bold text-sm uppercase">Dismiss</button>
-          </div>
-        )}
-
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <span className="h-px w-8 bg-[#064e3b]"></span>
-              <span className="text-xs font-bold uppercase tracking-widest text-[#064e3b]">
-                {products.length === MOCK_PRODUCTS.length ? 'Demo Catalog' : 'Active Inventory'}
-              </span>
-            </div>
-            <h2 className="text-4xl md:text-5xl font-black text-[#064e3b] tracking-tight">
-              {products.length} Products Available
-            </h2>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-gray-400 mr-2 uppercase tracking-widest">Layout</span>
-            <div className="flex bg-white shadow-sm border border-[#E7E5E4] p-1.5 rounded-2xl">
-               {(['compact', 'standard', 'xxl'] as ViewMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setViewMode(mode)}
-                  className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${viewMode === mode ? 'bg-[#064e3b] text-white shadow-md' : 'text-gray-400 hover:text-[#064e3b]'}`}
-                  title={`Switch to ${mode} mode`}
-                >
-                  {mode === 'compact' && <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>}
-                  {mode === 'standard' && <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>}
-                  {mode === 'xxl' && <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5z" /></svg>}
-                </button>
+            <div className={getGridClasses()}>
+              {filteredProducts.map((product) => (
+                <ProductCard 
+                  key={product.id} 
+                  product={product} 
+                  highlighted={searchResult?.matchId === product.id}
+                  viewMode={viewMode}
+                />
               ))}
             </div>
-          </div>
-        </div>
 
-        <div className={getGridClasses()}>
-          {filteredProducts.map((product) => (
-            <ProductCard 
-              key={product.id} 
-              product={product} 
-              highlighted={searchResult?.matchId === product.id}
-              viewMode={viewMode}
-            />
-          ))}
-        </div>
-
-        {filteredProducts.length === 0 && (
-          <div className="py-32 text-center bg-white rounded-[3rem] border border-dashed border-[#E7E5E4]">
-            <div className="w-24 h-24 bg-[#F5F5F4] rounded-full flex items-center justify-center mx-auto mb-6 text-gray-300">
-               <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-               </svg>
-            </div>
-            <h3 className="text-2xl font-bold text-[#064e3b]">No matches found</h3>
-            <p className="text-gray-500 mt-2">Try scanning a barcode or check your spelling.</p>
-            <button 
-              onClick={() => { setSearchQuery(''); setSearchResult(null); }}
-              className="mt-8 bg-[#064e3b] text-white px-8 py-3 rounded-2xl font-bold hover:opacity-90 transition shadow-lg"
-            >
-              Reset Filters
-            </button>
-          </div>
+            {filteredProducts.length === 0 && !isLoading && (
+              <div className="py-32 text-center bg-white rounded-[3rem] border border-dashed border-[#E7E5E4]">
+                <div className="w-24 h-24 bg-[#F5F5F4] rounded-full flex items-center justify-center mx-auto mb-6 text-gray-300">
+                   <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                   </svg>
+                </div>
+                <h3 className="text-2xl font-bold text-[#064e3b]">No hay resultados</h3>
+                <p className="text-gray-500 mt-2">Prueba escaneando un código diferente o sube productos nuevos.</p>
+                <button 
+                  onClick={() => { setSearchQuery(''); setSearchResult(null); }}
+                  className="mt-8 bg-[#064e3b] text-white px-8 py-3 rounded-2xl font-bold hover:opacity-90 transition shadow-lg"
+                >
+                  Restablecer
+                </button>
+              </div>
+            )}
+          </>
         )}
       </main>
 
-      {/* Primary Visual Search Action */}
       <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-40 flex gap-4">
         <button 
           onClick={() => setIsCameraOpen(true)}
@@ -255,13 +272,12 @@ const App: React.FC = () => {
             </svg>
           </div>
           <div className="text-left">
-            <div className="text-[10px] uppercase tracking-widest font-black opacity-60">Lens / Barcode</div>
-            <div className="text-xl font-black leading-none">Scan Item</div>
+            <div className="text-[10px] uppercase tracking-widest font-black opacity-60">IA Lens</div>
+            <div className="text-xl font-black leading-none">Escanear</div>
           </div>
         </button>
       </div>
 
-      {/* Floating Chat Concierge */}
       <ChatBot products={products} />
 
       {isCameraOpen && (
@@ -274,7 +290,6 @@ const App: React.FC = () => {
 
       {isDbManagerOpen && (
         <DatabaseManager 
-          onUpload={handleDatabaseUpload}
           onClose={() => setIsDbManagerOpen(false)}
         />
       )}
