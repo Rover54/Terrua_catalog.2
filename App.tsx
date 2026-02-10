@@ -68,31 +68,34 @@ const App: React.FC = () => {
     setStatus(AppStatus.SEARCHING);
     setErrorMessage(null);
     try {
-      // 1. La IA analiza la imagen (OCR + Reconocimiento de objeto)
       const aiResult = await performVisualSearch(base64);
       
-      // 2. Búsqueda local en el catálogo de Firestore (Eficiente para miles de productos)
       let matchId: string | null = null;
       let confidence = 0.95;
 
       // Prioridad 1: Coincidencia por código detectado
       if (aiResult.detectedCode) {
+        // Quitamos espacios y normalizamos para asegurar el match
+        const searchCode = aiResult.detectedCode.trim().toLowerCase();
         const found = products.find(p => 
-          p.productCode.toLowerCase() === aiResult.detectedCode?.toLowerCase()
+          p.productCode.toString().toLowerCase().trim() === searchCode
         );
-        if (found) matchId = found.id;
+        
+        // CORRECCIÓN: Usamos productCode como el ID de coincidencia
+        if (found) matchId = found.productCode; 
       }
 
-      // Prioridad 2: Si no hay código, buscar por palabras clave en nombre/tags
+      // Prioridad 2: Búsqueda por palabras clave
       if (!matchId) {
         const found = products.find(p => 
-          aiResult.suggestedKeywords.some(keyword => 
-            p.name.toLowerCase().includes(keyword.toLowerCase()) ||
-            p.tags.some(t => t.toLowerCase() === keyword.toLowerCase())
-          )
+          aiResult.suggestedKeywords.some(keyword => {
+            const k = keyword.toLowerCase();
+            return p.name.toLowerCase().includes(k) || 
+                   (p.tags && p.tags.some(t => t.toLowerCase() === k));
+          })
         );
         if (found) {
-          matchId = found.id;
+          matchId = found.productCode; // CORRECCIÓN
           confidence = 0.75;
         }
       }
@@ -109,11 +112,11 @@ const App: React.FC = () => {
       setStatus(AppStatus.IDLE);
       
       if (!matchId) {
-        setErrorMessage(`Detectado: "${aiResult.detectedObject}". No se encontró coincidencia exacta en los ${products.length} productos del inventario.`);
+        setErrorMessage(`Detectado: "${aiResult.detectedObject}". No se encontró coincidencia en los ${products.length} productos.`);
       }
     } catch (err) {
       console.error(err);
-      setErrorMessage("Error de procesamiento. Asegúrate de tener buena iluminación y conexión.");
+      setErrorMessage("Error de procesamiento visual.");
       setStatus(AppStatus.ERROR);
       setIsCameraOpen(false);
     }
