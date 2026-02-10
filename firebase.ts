@@ -1,4 +1,6 @@
-import { initializeApp } from "firebase/app";
+
+// Fix: Import initializeApp and helper functions to prevent multiple initialization issues
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
 // Configuración de Firebase para Terrua Store
@@ -12,5 +14,7 @@ const firebaseConfig = {
   measurementId: "G-H8BNCZJPYX"
 };
 
-const app = initializeApp(firebaseConfig);
+// Fix for "Module has no exported member 'initializeApp'" by ensuring clean initialization
+// and checking if app is already initialized to prevent runtime errors in React/Next environments.
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app);

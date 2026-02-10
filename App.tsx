@@ -43,6 +43,7 @@ const App: React.FC = () => {
   const filteredProducts = useMemo(() => {
     let list = [...products];
     
+    // Si hay un resultado de búsqueda visual, movemos el producto al inicio
     if (searchResult?.matchId && !searchQuery) {
        const matchedProduct = list.find(p => p.id === searchResult.matchId);
        const others = list.filter(p => p.id !== searchResult.matchId);
@@ -54,10 +55,10 @@ const App: React.FC = () => {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       list = list.filter(p => 
-        p.name.toLowerCase().includes(q) || 
-        p.productCode.toLowerCase().includes(q) ||
-        p.category.toLowerCase().includes(q) ||
-        p.tags.some(t => t.toLowerCase().includes(q))
+        (p.name?.toLowerCase() || '').includes(q) || 
+        (p.productCode?.toString().toLowerCase() || '').includes(q) ||
+        (p.category?.toLowerCase() || '').includes(q) ||
+        (p.tags && p.tags.some(t => t.toLowerCase().includes(q)))
       );
     }
     
@@ -75,27 +76,28 @@ const App: React.FC = () => {
 
       // Prioridad 1: Coincidencia por código detectado
       if (aiResult.detectedCode) {
-        // Quitamos espacios y normalizamos para asegurar el match
-        const searchCode = aiResult.detectedCode.trim().toLowerCase();
-        const found = products.find(p => 
-          p.productCode.toString().toLowerCase().trim() === searchCode
-        );
+        const searchCode = aiResult.detectedCode.toString().trim().toLowerCase();
+        const found = products.find(p => {
+          const pCode = (p.productCode || '').toString().trim().toLowerCase();
+          return pCode === searchCode;
+        });
         
-        // CORRECCIÓN: Usamos productCode como el ID de coincidencia
-        if (found) matchId = found.productCode; 
+        // IMPORTANTE: Guardamos el id de Firestore, no el productCode
+        if (found) matchId = found.id; 
       }
 
-      // Prioridad 2: Búsqueda por palabras clave
+      // Prioridad 2: Búsqueda por palabras clave (si no hubo match por código)
       if (!matchId) {
         const found = products.find(p => 
           aiResult.suggestedKeywords.some(keyword => {
             const k = keyword.toLowerCase();
-            return p.name.toLowerCase().includes(k) || 
-                   (p.tags && p.tags.some(t => t.toLowerCase() === k));
+            const nameMatch = (p.name || '').toLowerCase().includes(k);
+            const tagMatch = p.tags && p.tags.some(t => t.toLowerCase() === k);
+            return nameMatch || tagMatch;
           })
         );
         if (found) {
-          matchId = found.productCode; // CORRECCIÓN
+          matchId = found.id; 
           confidence = 0.75;
         }
       }
@@ -112,11 +114,11 @@ const App: React.FC = () => {
       setStatus(AppStatus.IDLE);
       
       if (!matchId) {
-        setErrorMessage(`Detectado: "${aiResult.detectedObject}". No se encontró coincidencia en los ${products.length} productos.`);
+        setErrorMessage(`Identificamos: "${aiResult.detectedObject}". No hay una coincidencia exacta en tu catálogo actual.`);
       }
     } catch (err) {
       console.error(err);
-      setErrorMessage("Error de procesamiento visual.");
+      setErrorMessage("Error al procesar la imagen. Revisa la iluminación y vuelve a intentar.");
       setStatus(AppStatus.ERROR);
       setIsCameraOpen(false);
     }
@@ -165,8 +167,6 @@ const App: React.FC = () => {
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2 1.5 3 3.5 3h9c2 0 3.5-1 3.5-3V7c0-2-1.5-3-3.5-3h-9C5.5 4 4 5 4 7z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7c0 1.5 1.5 2.5 3.5 2.5h9c2 0 3.5-1 3.5-2.5" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12c0 1.5 1.5 2.5 3.5 2.5h9c2 0 3.5-1 3.5-2.5" />
                 </svg>
                 Gestor DB
               </button>
@@ -210,11 +210,11 @@ const App: React.FC = () => {
                     <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-2">
                       <span className="bg-[#F5F5F4] text-[#064e3b] text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-[#E7E5E4]">Escaneo Finalizado</span>
                       {searchResult.detectedCode && (
-                        <span className="bg-[#F1F5F2] text-green-700 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-green-200">ID: {searchResult.detectedCode}</span>
+                        <span className="bg-[#F1F5F2] text-green-700 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-green-200">ID Detectado: {searchResult.detectedCode}</span>
                       )}
                     </div>
                     <h2 className="text-3xl font-black text-[#064e3b] mb-2">
-                      {searchResult.matchId ? '¡Producto Encontrado!' : 'Objeto Identificado'}
+                      {searchResult.matchId ? '¡Producto Encontrado!' : 'Análisis Completado'}
                     </h2>
                     <p className="text-gray-600 leading-relaxed italic max-w-2xl">
                       "{searchResult.reasoning}"
@@ -242,7 +242,7 @@ const App: React.FC = () => {
               <div>
                 <div className="flex items-center gap-3 mb-2">
                   <span className="h-px w-8 bg-[#064e3b]"></span>
-                  <span className="text-xs font-bold uppercase tracking-widest text-[#064e3b]">Inventario Sincronizado</span>
+                  <span className="text-xs font-bold uppercase tracking-widest text-[#064e3b]">Cloud Inventory</span>
                 </div>
                 <h2 className="text-4xl md:text-5xl font-black text-[#064e3b] tracking-tight">
                   {products.length} Productos
@@ -259,7 +259,7 @@ const App: React.FC = () => {
                       className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${viewMode === mode ? 'bg-[#064e3b] text-white shadow-md' : 'text-gray-400 hover:text-[#064e3b]'}`}
                     >
                       {mode === 'compact' && <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>}
-                      {mode === 'standard' && <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>}
+                      {mode === 'standard' && <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6z" /></svg>}
                       {mode === 'xxl' && <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5z" /></svg>}
                     </button>
                   ))}
@@ -286,12 +286,12 @@ const App: React.FC = () => {
                    </svg>
                 </div>
                 <h3 className="text-2xl font-bold text-[#064e3b]">No hay resultados</h3>
-                <p className="text-gray-500 mt-2">Prueba escaneando un código diferente o sube productos nuevos.</p>
+                <p className="text-gray-500 mt-2">Prueba escaneando un código diferente.</p>
                 <button 
                   onClick={() => { setSearchQuery(''); setSearchResult(null); }}
                   className="mt-8 bg-[#064e3b] text-white px-8 py-3 rounded-2xl font-bold hover:opacity-90 transition shadow-lg"
                 >
-                  Restablecer
+                  Ver todo
                 </button>
               </div>
             )}

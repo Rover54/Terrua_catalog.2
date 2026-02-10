@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 
 export interface AIAnalysisResult {
@@ -21,14 +22,15 @@ export const performVisualSearch = async (
     
     Return a JSON object:
     - detectedObject: short specific name of the item.
-    - detectedCode: the exact alphanumeric code found (null if none).
+    - detectedCode: the exact alphanumeric code found (return exactly "null" if none).
     - reasoning: brief explanation of what was found.
     - suggestedKeywords: array of descriptive words.
   `;
 
   try {
+    // Use gemini-3-pro-preview for complex reasoning tasks like visual code detection and product identification.
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3-pro-preview',
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: imageDataBase64 } },
@@ -41,23 +43,31 @@ export const performVisualSearch = async (
           type: Type.OBJECT,
           properties: {
             detectedObject: { type: Type.STRING },
-            detectedCode: { type: Type.STRING },
+            detectedCode: { type: Type.STRING, description: "Alphanumeric code or null" },
             reasoning: { type: Type.STRING },
             suggestedKeywords: { 
               type: Type.ARRAY,
               items: { type: Type.STRING }
             }
           },
-          required: ['detectedObject', 'reasoning', 'suggestedKeywords']
+          // Use propertyOrdering as shown in the @google/genai guidelines for Type.OBJECT.
+          propertyOrdering: ['detectedObject', 'detectedCode', 'reasoning', 'suggestedKeywords']
         }
       }
     });
 
-    // Directly access .text property as per guidelines.
+    // Access the .text property directly instead of calling it as a method.
     const resultStr = response.text;
     if (!resultStr) throw new Error("Empty response from AI");
     
-    return JSON.parse(resultStr) as AIAnalysisResult;
+    const parsed = JSON.parse(resultStr);
+    
+    // Normalización para asegurar que null sea null real
+    if (parsed.detectedCode === "null" || parsed.detectedCode === "") {
+      parsed.detectedCode = null;
+    }
+
+    return parsed as AIAnalysisResult;
   } catch (error) {
     console.error("Gemini Visual Analysis Error:", error);
     throw error;
